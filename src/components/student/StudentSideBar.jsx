@@ -9,6 +9,7 @@ import {
   ChevronDown,
   Settings2,
   HomeIcon,
+  NotebookTabs,
 } from "lucide-react";
 import { FaClipboardList, FaBook } from "react-icons/fa";
 import { useAuth } from "../../hooks/useAuth";
@@ -79,6 +80,41 @@ export default function Sidebar({ isOpen, onClose }) {
                 <Settings size={18} />
                 View Results
               </span>
+        </NavLink>
+
+        <NavLink
+            to="/student/fees"
+            onClick={onClose}
+            className={({ isActive }) =>
+              `block px-3 py-2 rounded-lg ${
+                isActive
+                  ? "bg-green-100 text-green-700 font-medium"
+                  : "text-gray-700 hover:bg-gray-100"
+              }`
+            }
+          >
+            <span className="flex items-center gap-2">
+              <FaBook size={16} />
+              My Fees
+            </span>
+        </NavLink>
+
+        <NavLink
+            to="/student/lessons"
+            onClick={onClose}
+            className={({ isActive }) =>
+              `block px-3 py-2 rounded-lg ${
+                isActive
+                  ? "bg-green-100 text-green-700 font-medium"
+                  : "text-gray-700 hover:bg-gray-100"
+              }`
+            }
+          >
+            <span className="flex items-center gap-2">
+              {/* <FaBook size={16} /> */}
+             <NotebookTabs size={16} />
+              E-Learning
+            </span>
         </NavLink>
 
           <NavLink

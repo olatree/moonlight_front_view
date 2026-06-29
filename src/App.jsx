@@ -55,6 +55,14 @@ import FeeAccountDetailsPage from "./pages/admin/fees/FeeAccountDetailsPage";
 import FeeReceiptPage from "./pages/admin/fees/FeeReceiptPage";
 import DebtorsListPage from "./pages/admin/fees/DebtorsListPage";
 import PaymentAnalysisPage from "./pages/admin/fees/PaymentAnalysisPage";
+import StudentFeesPage from "./pages/students/StudentFeesPage";
+import StudentDashboard from "./pages/students/StudentDashboard";
+import CreateLessonPage from "./pages/admin/lessons/CreateLessonPage";
+import ManageLessonsPage from "./pages/admin/lessons/ManageLessonsPage";
+import EditLessonPage from "./pages/admin/lessons/EditLessonPage";
+import StudentLessonsPage from "./pages/students/StudentLessonPage";
+import StudentLessonDetailsPage from "./pages/students/StudentLessonDetailPage";
+import PublishResultsPage from "./pages/admin/PublishResultPage";
 
 
 export default function App() {
@@ -124,6 +132,10 @@ export default function App() {
             <Route path="cbt/exams/results" element={<CbtResults />} />
             <Route path="cbt/exams/:examId/edit" element={<ExamEdit />} />
             <Route path="/admin/fees/payment-analysis" element={<PaymentAnalysisPage />} />
+            <Route path="/admin/lessons/create" element={<CreateLessonPage />} />
+            <Route path="/admin/lessons" element={<ManageLessonsPage />} />
+            <Route path="/admin/lessons/:id/edit" element={<EditLessonPage />} />
+            <Route path="/admin/publish-results" element={<PublishResultsPage />} />
           </Route>
         </Route>
       </Route>
@@ -131,12 +143,15 @@ export default function App() {
       {/* Student Routes */}
       <Route element={<ProtectedRoute />}>
         <Route path="/student" element={<StudentLayout />}>
-          <Route index element={<Dashboard />} />
+          <Route index element={<StudentDashboard />} />
           <Route path="result" element={<StudentViewResult />} />
           <Route path="exams" element={<StudentExams />} />
           <Route path="exams/:examId/lobby" element={<ExamLobby />} />
           <Route path="exams/:examId/run/:sessionId" element={<ExamRunner />} />
           <Route path="exams/:examId/result/:sessionId" element={<StudentExamResult />} />
+          <Route path="/student/fees" element={<StudentFeesPage />} />
+          <Route path="/student/lessons" element={<StudentLessonsPage />} />
+          <Route path="/student/lessons/:id" element={<StudentLessonDetailsPage />} />
         </Route>
       </Route>
 

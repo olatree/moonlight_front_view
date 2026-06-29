@@ -1,10 +1,15 @@
 
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import api from "../../../api/axios";
 
+const STORAGE_KEY = "debtorsListFilters";
+const PAGE_SIZE = 20;
+
+const formatMoney = (value) => `₦${Number(value || 0).toLocaleString()}`;
+
 const DebtorsListPage = () => {
-  const [sessions, setSessions] = useState([]);
+  const [activeSessionTerm, setActiveSessionTerm] = useState(null);
   const [terms, setTerms] = useState([]);
   const [classes, setClasses] = useState([]);
   const [arms, setArms] = useState([]);
@@ -21,31 +26,98 @@ const DebtorsListPage = () => {
     status: "",
   });
 
+  const [page, setPage] = useState(1);
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  const getResponseData = (res) => res.data?.data ?? res.data;
+
+  const saveFilters = (nextFilters, nextPage = page) => {
+    sessionStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        filters: nextFilters,
+        page: nextPage,
+      })
+    );
+  };
+
+  const updateFilter = (name, value) => {
+    const nextFilters = {
+      ...filters,
+      [name]: value,
+    };
+
+    if (name === "classId") {
+      nextFilters.armId = "";
+    }
+
+    setFilters(nextFilters);
+    setPage(1);
+    saveFilters(nextFilters, 1);
+  };
+
   const fetchInitialData = async () => {
     try {
-      const [sessionsRes, classesRes] = await Promise.all([
-        api.get("/sessions"),
+      setError("");
+
+      const [activeRes, classesRes] = await Promise.all([
+        api.get("/sessions/active"),
         api.get("/classes"),
       ]);
 
-      setSessions(sessionsRes.data.data || sessionsRes.data || []);
-      setClasses(classesRes.data.data || classesRes.data || []);
+      const activePayload = getResponseData(activeRes);
+      const classesPayload = getResponseData(classesRes);
+
+      const activeSession = activePayload?.session || null;
+      const activeTerm = activePayload?.term || null;
+
+      setActiveSessionTerm(activePayload || null);
+      setClasses(Array.isArray(classesPayload) ? classesPayload : []);
+
+      const sessionTerms = Array.isArray(activeSession?.terms)
+        ? activeSession.terms
+        : activeTerm
+        ? [activeTerm]
+        : [];
+
+      setTerms(sessionTerms);
+
+      const saved = JSON.parse(sessionStorage.getItem(STORAGE_KEY) || "null");
+      const restoredFilters = saved?.filters || {};
+
+      const nextFilters = {
+        sessionId: activeSession?._id || "",
+        termId: restoredFilters.termId || activeTerm?._id || "",
+        classId: restoredFilters.classId || "",
+        armId: restoredFilters.armId || "",
+        status: restoredFilters.status || "",
+      };
+
+      const restoredPage = Number(saved?.page || 1);
+
+      setFilters(nextFilters);
+      setPage(restoredPage);
+      saveFilters(nextFilters, restoredPage);
+
+      if (nextFilters.sessionId && nextFilters.termId) {
+        await fetchDebtors(nextFilters, restoredPage);
+      }
     } catch (err) {
       setError(err.response?.data?.message || "Failed to load filters");
     }
   };
 
-  const fetchDebtors = async () => {
+  const fetchDebtors = async (filtersToUse = filters, pageToUse = 1) => {
     try {
       setLoading(true);
       setError("");
       setHasSearched(true);
 
       const params = {};
-      Object.entries(filters).forEach(([key, value]) => {
+
+      Object.entries(filtersToUse).forEach(([key, value]) => {
         if (value) params[key] = value;
       });
 
@@ -53,7 +125,11 @@ const DebtorsListPage = () => {
 
       setDebtors(res.data.data || []);
       setTotalOutstanding(res.data.totalOutstanding || 0);
+      setPage(pageToUse);
+      saveFilters(filtersToUse, pageToUse);
     } catch (err) {
+      setDebtors([]);
+      setTotalOutstanding(0);
       setError(err.response?.data?.message || "Failed to load debtors");
     } finally {
       setLoading(false);
@@ -61,119 +137,93 @@ const DebtorsListPage = () => {
   };
 
   const resetFilters = () => {
-    setFilters({
-      sessionId: "",
-      termId: "",
+    const nextFilters = {
+      sessionId: activeSessionTerm?.session?._id || "",
+      termId: activeSessionTerm?.term?._id || "",
       classId: "",
       armId: "",
       status: "",
-    });
+    };
 
-    setTerms([]);
+    setFilters(nextFilters);
     setArms([]);
     setDebtors([]);
     setTotalOutstanding(0);
     setHasSearched(false);
+    setPage(1);
     setError("");
+
+    saveFilters(nextFilters, 1);
   };
 
   useEffect(() => {
     fetchInitialData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    const selectedSession = sessions.find((s) => s._id === filters.sessionId);
-
-    setTerms(selectedSession?.terms || []);
-
-    setFilters((prev) => ({
-      ...prev,
-      termId: "",
-    }));
-  }, [filters.sessionId, sessions]);
-
-  useEffect(() => {
     const selectedClass = classes.find((cls) => cls._id === filters.classId);
-
-    setArms(selectedClass?.arms || []);
-
-    setFilters((prev) => ({
-      ...prev,
-      armId: "",
-    }));
+    setArms(Array.isArray(selectedClass?.arms) ? selectedClass.arms : []);
   }, [filters.classId, classes]);
+
+  const totalPages = Math.max(Math.ceil(debtors.length / PAGE_SIZE), 1);
+
+  const paginatedDebtors = useMemo(() => {
+    const start = (page - 1) * PAGE_SIZE;
+    return debtors.slice(start, start + PAGE_SIZE);
+  }, [debtors, page]);
+
+  const changePage = (nextPage) => {
+    const safePage = Math.min(Math.max(nextPage, 1), totalPages);
+    setPage(safePage);
+    saveFilters(filters, safePage);
+  };
 
   return (
     <div className="min-h-screen bg-gray-50 p-3 sm:p-4 md:p-6">
       <style>
-  {`
-    @media print {
-      @page {
-        size: A4 portrait;
-        margin: 10mm;
-      }
+        {`
+          @media print {
+            @page { size: A4 portrait; margin: 10mm; }
+            body { background: white !important; }
+            table { width: 100% !important; border-collapse: collapse !important; font-size: 10px !important; }
+            th, td { padding: 4px 6px !important; border: 1px solid #000 !important; }
+            h1 { font-size: 16px !important; }
+            .print\\:hidden { display: none !important; }
+            .print\\:block { display: block !important; }
+            .shadow-sm, .shadow { box-shadow: none !important; }
+            .rounded-xl, .rounded-lg { border-radius: 0 !important; }
+          }
+        `}
+      </style>
 
-      body {
-        background: white !important;
-      }
-
-      table {
-        width: 100% !important;
-        border-collapse: collapse !important;
-        font-size: 10px !important;
-      }
-
-      th,
-      td {
-        padding: 4px 6px !important;
-        border: 1px solid #000 !important;
-      }
-
-      h1 {
-        font-size: 16px !important;
-      }
-
-      h2 {
-        font-size: 13px !important;
-      }
-
-      .print\\:hidden {
-        display: none !important;
-      }
-
-      .print\\:block {
-        display: block !important;
-      }
-
-      .shadow-sm,
-      .shadow {
-        box-shadow: none !important;
-      }
-
-      .rounded-xl,
-      .rounded-lg {
-        border-radius: 0 !important;
-      }
-    }
-  `}
-</style>
-      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between print:hidden">
         <div>
           <h1 className="text-xl font-bold text-gray-800 sm:text-2xl">
             Debtors List
           </h1>
           <p className="mt-1 text-xs text-gray-500 sm:text-sm">
-            Filter and view students with outstanding school fee balances.
+            Current-session outstanding fee balances.
           </p>
         </div>
 
         <button
           onClick={() => window.print()}
           disabled={!hasSearched || debtors.length === 0}
-          className="w-full rounded-lg bg-green-600 px-4 py-3 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto print:hidden"
+          className="w-full rounded-lg bg-green-600 px-4 py-3 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
         >
           Print
         </button>
+      </div>
+
+      <div className="hidden print:block">
+        <h1 className="text-center font-bold">Debtors List</h1>
+        <p className="mb-3 text-center text-xs">
+          {activeSessionTerm?.session?.name || ""}{" "}
+          {filters.termId
+            ? `• ${terms.find((t) => t._id === filters.termId)?.name || ""}`
+            : ""}
+        </p>
       </div>
 
       {error && (
@@ -183,33 +233,31 @@ const DebtorsListPage = () => {
       )}
 
       <div className="mb-4 rounded-xl bg-white p-4 shadow-sm print:hidden">
-        <div className="mb-4">
-          <h2 className="text-base font-semibold text-gray-700">Filters</h2>
-          <p className="mt-1 text-xs text-gray-500">
-            Select filters, then click Apply Filters. Debtors will not load
-            automatically.
-          </p>
+        <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-base font-semibold text-gray-700">Filters</h2>
+            <p className="mt-1 text-xs text-gray-500">
+              Session is locked to the current active session.
+            </p>
+          </div>
+
+          {activeSessionTerm?.session && (
+            <span className="w-fit rounded-full bg-green-50 px-3 py-1 text-xs font-semibold text-green-700">
+              {activeSessionTerm.session.name}
+            </span>
+          )}
         </div>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
           <div>
             <label className="mb-1 block text-xs font-medium text-gray-600">
-              Session
+              Current Session
             </label>
-            <select
-              value={filters.sessionId}
-              onChange={(e) =>
-                setFilters({ ...filters, sessionId: e.target.value })
-              }
-              className="w-full rounded-lg border px-3 py-3 text-sm outline-none focus:border-green-500"
-            >
-              <option value="">All Sessions</option>
-              {sessions.map((session) => (
-                <option key={session._id} value={session._id}>
-                  {session.name}
-                </option>
-              ))}
-            </select>
+            <input
+              value={activeSessionTerm?.session?.name || "No active session"}
+              disabled
+              className="w-full rounded-lg border bg-gray-100 px-3 py-3 text-sm text-gray-600"
+            />
           </div>
 
           <div>
@@ -218,9 +266,7 @@ const DebtorsListPage = () => {
             </label>
             <select
               value={filters.termId}
-              onChange={(e) =>
-                setFilters({ ...filters, termId: e.target.value })
-              }
+              onChange={(e) => updateFilter("termId", e.target.value)}
               className="w-full rounded-lg border px-3 py-3 text-sm outline-none focus:border-green-500"
             >
               <option value="">All Terms</option>
@@ -238,9 +284,7 @@ const DebtorsListPage = () => {
             </label>
             <select
               value={filters.classId}
-              onChange={(e) =>
-                setFilters({ ...filters, classId: e.target.value })
-              }
+              onChange={(e) => updateFilter("classId", e.target.value)}
               className="w-full rounded-lg border px-3 py-3 text-sm outline-none focus:border-green-500"
             >
               <option value="">All Classes</option>
@@ -258,10 +302,9 @@ const DebtorsListPage = () => {
             </label>
             <select
               value={filters.armId}
-              onChange={(e) =>
-                setFilters({ ...filters, armId: e.target.value })
-              }
-              className="w-full rounded-lg border px-3 py-3 text-sm outline-none focus:border-green-500"
+              onChange={(e) => updateFilter("armId", e.target.value)}
+              disabled={!filters.classId}
+              className="w-full rounded-lg border px-3 py-3 text-sm outline-none focus:border-green-500 disabled:bg-gray-100"
             >
               <option value="">All Arms</option>
               {arms.map((arm) => (
@@ -273,27 +316,25 @@ const DebtorsListPage = () => {
           </div>
 
           <div>
-  <label className="mb-1 block text-xs font-medium text-gray-600">
-    Payment Status
-  </label>
-  <select
-    value={filters.status}
-    onChange={(e) =>
-      setFilters({ ...filters, status: e.target.value })
-    }
-    className="w-full rounded-lg border px-3 py-3 text-sm outline-none focus:border-green-500"
-  >
-    <option value="">All Debtors</option>
-    <option value="unpaid">Unpaid</option>
-    <option value="part_payment">Part Payment</option>
-    <option value="overpaid">Overpaid</option>
-  </select>
-</div>
+            <label className="mb-1 block text-xs font-medium text-gray-600">
+              Payment Status
+            </label>
+            <select
+              value={filters.status}
+              onChange={(e) => updateFilter("status", e.target.value)}
+              className="w-full rounded-lg border px-3 py-3 text-sm outline-none focus:border-green-500"
+            >
+              <option value="">All Debtors</option>
+              <option value="unpaid">Unpaid</option>
+              <option value="part_payment">Part Payment</option>
+              <option value="overpaid">Overpaid</option>
+            </select>
+          </div>
         </div>
 
         <div className="mt-4 flex flex-col gap-2 sm:flex-row">
           <button
-            onClick={fetchDebtors}
+            onClick={() => fetchDebtors(filters, 1)}
             disabled={loading}
             className="w-full rounded-lg bg-green-600 px-4 py-3 text-sm font-medium text-white disabled:opacity-60 sm:w-auto"
           >
@@ -313,11 +354,11 @@ const DebtorsListPage = () => {
       <div className="mb-4 rounded-xl bg-white p-4 shadow-sm">
         <p className="text-xs text-gray-500">Total Outstanding</p>
         <h2 className="mt-1 text-2xl font-bold text-red-700">
-          ₦{Number(totalOutstanding || 0).toLocaleString()}
+          {formatMoney(totalOutstanding)}
         </h2>
         <p className="mt-1 text-xs text-gray-500">
           {hasSearched
-            ? `Total debtors: ${debtors.length}`
+            ? `Total debtors: ${debtors.length} • Showing page ${page} of ${totalPages}`
             : "Apply filters to view debtors"}
         </p>
       </div>
@@ -328,70 +369,20 @@ const DebtorsListPage = () => {
         </h2>
 
         {loading ? (
-          <p className="text-sm text-gray-500">Loading...</p>
+          <p className="py-6 text-center text-sm text-gray-500">Loading...</p>
         ) : !hasSearched ? (
-          <p className="text-sm text-gray-500">
+          <p className="py-6 text-center text-sm text-gray-500">
             Select your filters and click Apply Filters to view debtors.
           </p>
         ) : debtors.length === 0 ? (
-          <p className="text-sm text-gray-500">
+          <p className="py-6 text-center text-sm text-gray-500">
             No debtors found for the selected filters.
           </p>
         ) : (
           <>
             <div className="space-y-3 md:hidden print:hidden">
-              {debtors.map((account) => (
-                <div
-                  key={account._id}
-                  className="rounded-xl border bg-white p-3 text-sm"
-                >
-                  <div className="mb-3">
-                    <h3 className="font-semibold text-gray-800">
-                      {account.studentId?.name}
-                    </h3>
-                    <p className="text-xs text-gray-500">
-                      Admission No: {account.studentId?.admissionNumber}
-                    </p>
-                    <p className="text-xs text-gray-500">
-                      Parent Contact: {account.studentId?.parentContact || "N/A"}
-                    </p>
-                  </div>
-
-                  <div className="mb-3 rounded-lg bg-gray-50 p-3">
-                    <p className="text-xs text-gray-500">Class</p>
-                    <p className="text-sm font-medium text-gray-800">
-                      {account.classId?.name} {account.armId?.name}
-                    </p>
-
-                    <p className="mt-2 text-xs text-gray-500">Session/Term</p>
-                    <p className="text-sm font-medium text-gray-800">
-                      {account.sessionId?.name} - {account.termId?.name}
-                    </p>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-2 text-xs">
-                    <div className="rounded-lg bg-gray-100 p-2">
-                      <p className="text-gray-500">Payable</p>
-                      <p className="font-semibold text-gray-800">
-                        ₦{Number(account.netPayable || 0).toLocaleString()}
-                      </p>
-                    </div>
-
-                    <div className="rounded-lg bg-green-50 p-2">
-                      <p className="text-gray-500">Paid</p>
-                      <p className="font-semibold text-green-700">
-                        ₦{Number(account.totalPaid || 0).toLocaleString()}
-                      </p>
-                    </div>
-
-                    <div className="rounded-lg bg-red-50 p-2">
-                      <p className="text-gray-500">Due</p>
-                      <p className="font-semibold text-red-700">
-                        ₦{Number(account.totalDue || 0).toLocaleString()}
-                      </p>
-                    </div>
-                  </div>
-                </div>
+              {paginatedDebtors.map((account) => (
+                <DebtorCard key={account._id} account={account} />
               ))}
             </div>
 
@@ -409,7 +400,7 @@ const DebtorsListPage = () => {
                 </thead>
 
                 <tbody>
-                  {debtors.map((account) => (
+                  {paginatedDebtors.map((account) => (
                     <tr key={account._id}>
                       <td className="border px-3 py-2">
                         <div className="font-medium text-gray-800">
@@ -435,26 +426,101 @@ const DebtorsListPage = () => {
                       </td>
 
                       <td className="border px-3 py-2">
-                        ₦{Number(account.netPayable || 0).toLocaleString()}
+                        {formatMoney(account.netPayable)}
                       </td>
 
                       <td className="border px-3 py-2 text-green-700">
-                        ₦{Number(account.totalPaid || 0).toLocaleString()}
+                        {formatMoney(account.totalPaid)}
                       </td>
 
                       <td className="border px-3 py-2 font-semibold text-red-700">
-                        ₦{Number(account.totalDue || 0).toLocaleString()}
+                        {formatMoney(account.totalDue)}
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
+
+            {debtors.length > PAGE_SIZE && (
+              <div className="mt-4 flex items-center justify-between gap-3 print:hidden">
+                <button
+                  onClick={() => changePage(page - 1)}
+                  disabled={page <= 1}
+                  className="rounded-lg bg-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 disabled:opacity-50"
+                >
+                  Previous
+                </button>
+
+                <span className="text-xs text-gray-500">
+                  Page {page} of {totalPages}
+                </span>
+
+                <button
+                  onClick={() => changePage(page + 1)}
+                  disabled={page >= totalPages}
+                  className="rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                >
+                  Next
+                </button>
+              </div>
+            )}
           </>
         )}
       </div>
     </div>
   );
 };
+
+const DebtorCard = ({ account }) => (
+  <div className="rounded-xl border bg-white p-3 text-sm">
+    <div className="mb-3">
+      <h3 className="font-semibold text-gray-800">
+        {account.studentId?.name}
+      </h3>
+      <p className="text-xs text-gray-500">
+        Admission No: {account.studentId?.admissionNumber}
+      </p>
+      <p className="text-xs text-gray-500">
+        Parent Contact: {account.studentId?.parentContact || "N/A"}
+      </p>
+    </div>
+
+    <div className="mb-3 rounded-lg bg-gray-50 p-3">
+      <p className="text-xs text-gray-500">Class</p>
+      <p className="text-sm font-medium text-gray-800">
+        {account.classId?.name} {account.armId?.name}
+      </p>
+
+      <p className="mt-2 text-xs text-gray-500">Session/Term</p>
+      <p className="text-sm font-medium text-gray-800">
+        {account.sessionId?.name} - {account.termId?.name}
+      </p>
+    </div>
+
+    <div className="grid grid-cols-3 gap-2 text-xs">
+      <div className="rounded-lg bg-gray-100 p-2">
+        <p className="text-gray-500">Payable</p>
+        <p className="font-semibold text-gray-800">
+          {formatMoney(account.netPayable)}
+        </p>
+      </div>
+
+      <div className="rounded-lg bg-green-50 p-2">
+        <p className="text-gray-500">Paid</p>
+        <p className="font-semibold text-green-700">
+          {formatMoney(account.totalPaid)}
+        </p>
+      </div>
+
+      <div className="rounded-lg bg-red-50 p-2">
+        <p className="text-gray-500">Due</p>
+        <p className="font-semibold text-red-700">
+          {formatMoney(account.totalDue)}
+        </p>
+      </div>
+    </div>
+  </div>
+);
 
 export default DebtorsListPage;
